@@ -1,0 +1,197 @@
+[9/7/2026 10:41 PM] ⛧NAVID𓆃‌XAAN⛧: name: Build Release Artifact (ATS-MINI New V3.0 / OSPI)
+
+# Manually-triggered workflow that compiles the ESP32-S3 OSPI build and
+# packages a single, ready-to-flash artifact:
+#   ATS-MINI-New-V3.0-Firmware
+# containing firmware.bin, bootloader.bin, partitions.bin, boot_app0.bin,
+# firmware.elf, partitions.csv, FLASH_ADDRESS.txt and BUILD_INFO.txt.
+#
+# This does NOT replace .github/workflows/build.yml (the project's existing
+# multi-board / auto-release CI) - it is an additional, simpler, single-board
+# workflow, kept separate on purpose so nothing existing is removed.
+
+on:
+  workflow_dispatch: {}
+
+env:
+  FQBN: "esp32:esp32:esp32s3:CDCOnBoot=cdc,FlashSize=8M,PSRAM=opi,CPUFreq=80,USBMode=hwcdc,FlashMode=qio,PartitionScheme=custom,DebugLevel=none"
+  CORE_VERSION: "3.3.8"
+  BOARD_INDEX_URL: "https://espressif.github.io/arduino-esp32/package_esp32_index.json"
+  SKETCH_DIR: "ats-mini"
+  ARTIFACT_NAME: "ATS-MINI-New-V3.0-Firmware"
+
+jobs:
+  build:
+    name: Build ESP32-S3 OSPI firmware
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      # ---------------------------------------------------------------
+      # 1. Install Arduino CLI
+      # ---------------------------------------------------------------
+      - name: Install Arduino CLI
+        uses: arduino/setup-arduino-cli@v2
+
+      # ---------------------------------------------------------------
+      # 2. Install the ESP32 Arduino Core (pinned version)
+      # ---------------------------------------------------------------
+      - name: Configure board index
+        run: arduino-cli config init --additional-urls "${{ env.BOARD_INDEX_URL }}"
+
+      - name: Update core index
+        run: arduino-cli core update-index
+
+      - name: Install ESP32 core ${{ env.CORE_VERSION }}
+        run: arduino-cli core install "esp32:esp32@${{ env.CORE_VERSION }}"
+
+      # ---------------------------------------------------------------
+      # 3. Install the exact library versions this project depends on
+      #    (names and versions taken verbatim from ats-mini/sketch.yaml,
+      #    the project's own verified build profile)
+      # ---------------------------------------------------------------
+      - name: Install required libraries
+        run: |
+          arduino-cli lib install \
+            "PU2CLR SI4735@2.1.8" \
+            "TFT_eSPI@2.5.43" \
+            "Async TCP@3.4.10" \
+            "ESP Async WebServer@3.11.0" \
+            "NTPClient@3.2.1"
+
+      # ---------------------------------------------------------------
+      # 4-5. Compile the sketch and export all binaries
+      # ---------------------------------------------------------------
+      - name: Compile firmware
+        run: |
+          arduino-cli compile \
+            --fqbn "${{ env.FQBN }}" \
+            --export-binaries \
+            --warnings default \
+            "${{ env.SKETCH_DIR }}"
+
+      # ---------------------------------------------------------------
+      # 6. Collect and rename the build outputs into the artifact folder.
+      #    Nothing here is guessed: every filename is located with find
+      #    in the real build output, and every flash address either comes
+      #    straight from ats-mini/partitions.csv or from the addresses
+      #    already documented in docs/source/flash.md of this repository.
+      # ---------------------------------------------------------------
+      - name: Locate build outputs
+        id: outputs
+        run: |
+          set -euo pipefail
+          BUILD_DIR="${{ env.SKETCH_DIR }}/build/esp32.esp32.esp32s3"
+          echo "Build directory contents:"
+          ls -la "$BUILD_DIR"
+
+          echo "build_dir=$BUILD_DIR" >> "$GITHUB_OUTPUT"
+
+          BOOT_APP0=$(find / -name "boot_app0.bin" -path "*esp32*${{ env.CORE_VERSION }}*" 2>/dev/null | head -n 1 || true)
+[9/7/2026 10:41 PM] ⛧NAVID𓆃‌XAAN⛧: if [ -z "$BOOT_APP0" ]; then
+            BOOT_APP0=$(find / -name "boot_app0.bin" 2>/dev/null | head -n 1 || true)
+          fi
+          echo "boot_app0_path=$BOOT_APP0" >> "$GITHUB_OUTPUT"
+          echo "Found boot_app0.bin at: $BOOT_APP0"
+
+      - name: Assemble artifact folder
+        run: |
+          set -euo pipefail
+          OUT="artifact/${{ env.ARTIFACT_NAME }}"
+          BUILD_DIR="${{ steps.outputs.outputs.build_dir }}"
+          BOOT_APP0="${{ steps.outputs.outputs.boot_app0_path }}"
+          mkdir -p "$OUT"
+
+          cp "$BUILD_DIR"/*.ino.bin              "$OUT/firmware.bin"
+          cp "$BUILD_DIR"/*.ino.bootloader.bin    "$OUT/bootloader.bin"
+          cp "$BUILD_DIR"/*.ino.partitions.bin    "$OUT/partitions.bin"
+          cp "$BUILD_DIR"/*.ino.merged.bin        "$OUT/merged.bin" || true
+
+          ELF_FILE=$(ls "$BUILD_DIR"/*.ino.elf 2>/dev/null | head -n 1 || true)
+          if [ -n "$ELF_FILE" ]; then
+            cp "$ELF_FILE" "$OUT/firmware.elf"
+          fi
+
+          if [ -n "$BOOT_APP0" ] && [ -f "$BOOT_APP0" ]; then
+            cp "$BOOT_APP0" "$OUT/boot_app0.bin"
+          else
+            echo "WARNING: boot_app0.bin was not found by the workflow." > "$OUT/boot_app0_MISSING.txt"
+          fi
+
+          cp "${{ env.SKETCH_DIR }}/partitions.csv" "$OUT/partitions.csv"
+
+          # ---- Flash address map: derived from partitions.csv + repo docs ----
+          APP0_OFFSET=$(awk -F',' '$1=="app0"{gsub(/ /,"",$4); print $4}' "${{ env.SKETCH_DIR }}/partitions.csv")
+          OTADATA_OFFSET=$(awk -F',' '$1=="otadata"{gsub(/ /,"",$4); print $4}' "${{ env.SKETCH_DIR }}/partitions.csv")
+
+          cat > "$OUT/FLASH_ADDRESS.txt" << EOF
+          ATS Mini - New V3.0 - Flash Address Map (ESP32-S3, OSPI PSRAM)
+          =================================================================
+
+          bootloader.bin   -> 0x0        (ESP32-S3 Arduino core, fixed offset;
+                                           documented in docs/source/flash.md)
+          partitions.bin   -> 0x8000     (ESP32-S3 Arduino core, fixed offset;
+                                           documented in docs/source/flash.md)
+          boot_app0.bin    -> $OTADATA_OFFSET     (= 'otadata' offset, read from partitions.csv)
+          firmware.bin     -> $APP0_OFFSET    (= 'app0' offset, read from partitions.csv)
+          merged.bin       -> 0x0        (single-file alternative that already
+                                           contains bootloader + partitions + firmware)
+
+          Three-file esptool.py command:
+            esptool.py --chip esp32s3 --port PORT --baud 921600 \\
+              --before default-reset --after hard-reset write_flash -z \\
+              --flash-mode keep --flash-freq keep --flash-size keep \\
+              0x0 bootloader.bin $OTADATA_OFFSET boot_app0.bin \\
+              0x8000 partitions.bin $APP0_OFFSET firmware.bin
+
+          Single merged-file esptool.py command:
+            esptool.py --chip esp32s3 --port PORT --baud 921600 \\
+              --before default-reset --after hard-reset write_flash -z \\
+              --flash-mode keep --flash-freq keep --flash-size keep \\
+              0x0 merged.bin
+
+          Note: the project's own docs/source/flash.md flashes only
+          bootloader+partitions+firmware (3 files) or merged.bin, without
+          boot_app0.bin - a blank 'otadata' partition already boots app0 by
+          default. boot_app0.bin is included here for completeness/OTA
+          tooling, but is not strictly required for a first flash.
+          EOF
+
+          # ---- Build info ----
+          VER_APP=$(grep -oP 'VER_APP\s+\K\d+' "${{ env.SKETCH_DIR }}/Common.h" || echo "unknown")
+          EDITION=$(grep -oP '(?<=FIRMWARE_EDITION ")[^"]+' "${{ env.SKETCH_DIR }}/Common.h" || echo "unknown")
+[9/7/2026 10:41 PM] ⛧NAVID𓆃‌XAAN⛧: cat > "$OUT/BUILD_INFO.txt" << EOF
+          ATS Mini - New V3.0 - Build Info
+          =================================================================
+          Project:            ATS Mini
+          Edition:            $EDITION
+          VER_APP:            $VER_APP
+          Board:               ESP32-S3
+          FQBN:                ${{ env.FQBN }}
+          Arduino ESP32 Core:  $CORE_VERSION
+          Libraries:
+            - PU2CLR SI4735      2.1.8
+            - TFT_eSPI           2.5.43
+            - Async TCP          3.4.10
+            - ESP Async WebServer 3.11.0
+            - NTPClient          3.2.1
+          Git commit:          ${{ github.sha }}
+          Built by workflow:   ${{ github.workflow }} (run #${{ github.run_number }})
+          Build date (UTC):    $(date -u +"%Y-%m-%d %H:%M:%S")
+          EOF
+
+          echo "Final artifact contents:"
+          ls -la "$OUT"
+        env:
+          CORE_VERSION: ${{ env.CORE_VERSION }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ env.ARTIFACT_NAME }}
+          path: artifact/${{ env.ARTIFACT_NAME }}
+          if-no-files-found: error
