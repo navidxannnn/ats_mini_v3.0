@@ -76,7 +76,7 @@ jobs:
 
       # ---------------------------------------------------------------
       # 6. Collect and rename the build outputs into the artifact folder.
-      #    Nothing here is guessed: every filename is located with find
+      #    Nothing here is guessed: every filename is located with `find`
       #    in the real build output, and every flash address either comes
       #    straight from ats-mini/partitions.csv or from the addresses
       #    already documented in docs/source/flash.md of this repository.
@@ -92,7 +92,7 @@ jobs:
           echo "build_dir=$BUILD_DIR" >> "$GITHUB_OUTPUT"
 
           BOOT_APP0=$(find / -name "boot_app0.bin" -path "*esp32*${{ env.CORE_VERSION }}*" 2>/dev/null | head -n 1 || true)
-if [ -z "$BOOT_APP0" ]; then
+          if [ -z "$BOOT_APP0" ]; then
             BOOT_APP0=$(find / -name "boot_app0.bin" 2>/dev/null | head -n 1 || true)
           fi
           echo "boot_app0_path=$BOOT_APP0" >> "$GITHUB_OUTPUT"
@@ -164,7 +164,8 @@ if [ -z "$BOOT_APP0" ]; then
           # ---- Build info ----
           VER_APP=$(grep -oP 'VER_APP\s+\K\d+' "${{ env.SKETCH_DIR }}/Common.h" || echo "unknown")
           EDITION=$(grep -oP '(?<=FIRMWARE_EDITION ")[^"]+' "${{ env.SKETCH_DIR }}/Common.h" || echo "unknown")
- cat > "$OUT/BUILD_INFO.txt" << EOF
+
+          cat > "$OUT/BUILD_INFO.txt" << EOF
           ATS Mini - New V3.0 - Build Info
           =================================================================
           Project:            ATS Mini
