@@ -1,4 +1,4 @@
-[9/7/2026 10:41 PM] ⛧NAVID𓆃‌XAAN⛧: name: Build Release Artifact (ATS-MINI New V3.0 / OSPI)
+name: Build Release Artifact (ATS-MINI New V3.0 / OSPI)
 
 # Manually-triggered workflow that compiles the ESP32-S3 OSPI build and
 # packages a single, ready-to-flash artifact:
@@ -92,7 +92,7 @@ jobs:
           echo "build_dir=$BUILD_DIR" >> "$GITHUB_OUTPUT"
 
           BOOT_APP0=$(find / -name "boot_app0.bin" -path "*esp32*${{ env.CORE_VERSION }}*" 2>/dev/null | head -n 1 || true)
-[9/7/2026 10:41 PM] ⛧NAVID𓆃‌XAAN⛧: if [ -z "$BOOT_APP0" ]; then
+if [ -z "$BOOT_APP0" ]; then
             BOOT_APP0=$(find / -name "boot_app0.bin" 2>/dev/null | head -n 1 || true)
           fi
           echo "boot_app0_path=$BOOT_APP0" >> "$GITHUB_OUTPUT"
@@ -164,7 +164,7 @@ jobs:
           # ---- Build info ----
           VER_APP=$(grep -oP 'VER_APP\s+\K\d+' "${{ env.SKETCH_DIR }}/Common.h" || echo "unknown")
           EDITION=$(grep -oP '(?<=FIRMWARE_EDITION ")[^"]+' "${{ env.SKETCH_DIR }}/Common.h" || echo "unknown")
-[9/7/2026 10:41 PM] ⛧NAVID𓆃‌XAAN⛧: cat > "$OUT/BUILD_INFO.txt" << EOF
+ cat > "$OUT/BUILD_INFO.txt" << EOF
           ATS Mini - New V3.0 - Build Info
           =================================================================
           Project:            ATS Mini
